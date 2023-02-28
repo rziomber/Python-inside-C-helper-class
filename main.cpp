@@ -1,3 +1,4 @@
+//g++ main.cpp $(python3-config --embed --ldflags) -fpie $(python3-config --cflags --embed) -std=c++17
 #include "./python.h"
 #include <iostream>
 #include <string>
