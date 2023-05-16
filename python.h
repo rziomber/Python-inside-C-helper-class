@@ -2,7 +2,8 @@
 #define PythonHelperClass_h
 #include <Python.h>
 #include <string>
-
+#include <iostream>
+#include <memory>
 class PyHelper {
 public:
     PyHelper() {
@@ -11,11 +12,11 @@ public:
         return str(eval(runThisCommand)))rawliteral");
         pModule_ = PyImport_AddModule("__main__");
     }
-    
+
     ~PyHelper() {
         Py_Finalize();
     }
-    
+
     std::string runPythonFunction(const std::string& cmd) {
         PyObject* pName = PyUnicode_DecodeFSDefault("helperFunctionForPyCPP");
         PyObject* pFunc = PyObject_GetAttr(pModule_, pName);
@@ -37,7 +38,7 @@ public:
         Py_XDECREF(pFunc);
         return "";
     }
-    
+
     PyObject *convertVariableToPyObject(bool var)
     {
         return PyBool_FromLong((long)var);
@@ -90,7 +91,7 @@ public:
     {
         return Py_BuildValue("y#", var, strlen(var));
     }
-    
+
     template <typename... T>
     PyObject *convertArgumentsToPyTuple(T &&... multi_inputs) //https://stackoverflow.com/questions/7230621/how-can-i-iterate-over-a-packed-variadic-template-argument-list
     {
@@ -105,60 +106,34 @@ public:
          ...);
         return pTupleWithArguments;
     }
-    
-    #define PREPARE_CALLBACK                                           \
-    PyObject *moduleString = PyUnicode_FromString(moduleName);     \
-    PyObject *module = PyImport_Import(moduleString);              \
-    PyObject *func = PyObject_GetAttrString(module, functionName); \
-    PyObject *args = convertArgumentsToPyTuple(multi_inputs...);   \
-    PyObject *myResult = PyObject_CallObject(func, args);
-    
-    #define FINISH_CALLBACK      \
-    Py_DECREF(moduleString); \
-    Py_DECREF(module);       \
-    Py_DECREF(func);         \
-    Py_DECREF(args);         \
-    Py_DECREF(myResult);     \
-    return result;
-    
-    template <typename... T>
-    long runPythonFunctionLong(const char *moduleName, const char *functionName, T &&... multi_inputs)
+
+    template <typename R, typename... T>
+    R runPythonFunction(const char *moduleName, const char *functionName, T &&... multi_inputs)
     {
-        PREPARE_CALLBACK
-        long result = PyLong_AsLong(myResult);
-        FINISH_CALLBACK
-    }
-    
-    template <typename... T>
-    unsigned long runPythonFunctionUnsignedLong(const char *moduleName, const char *functionName, T &&... multi_inputs)
-    {
-        PREPARE_CALLBACK
-        unsigned long result = PyLong_AsUnsignedLong(myResult);
-        FINISH_CALLBACK
-    }
-    
-    template <typename... T>
-    long long runPythonFunctionLongLong(const char *moduleName, const char *functionName, T &&... multi_inputs)
-    {
-        PREPARE_CALLBACK
-        long long result = PyLong_AsLongLong(myResult);
-        FINISH_CALLBACK
-    }
-    
-    template <typename... T>
-    unsigned long long runPythonFunctionLongLong(const char *moduleName, const char *functionName, T &&... multi_inputs)
-    {
-        PREPARE_CALLBACK
-        unsigned long long result = PyLong_AsUnsignedLongLong(myResult);
-        FINISH_CALLBACK
-    }
-    
-    template <typename... T>
-    double runPythonFunctionDouble(const char *moduleName, const char *functionName, T &&... multi_inputs)
-    {
-        PREPARE_CALLBACK
-        double result = PyFloat_AsDouble(myResult);
-        FINISH_CALLBACK
+        std::unique_ptr<PyObject, decltype(&Py_DECREF)> moduleString(PyUnicode_FromString(moduleName), Py_DECREF);
+        std::unique_ptr<PyObject, decltype(&Py_DECREF)> module(PyImport_Import(moduleString.get()), Py_DECREF);
+        std::unique_ptr<PyObject, decltype(&Py_DECREF)> func(PyObject_GetAttrString(module.get(), functionName), Py_DECREF);
+        std::unique_ptr<PyObject, decltype(&Py_DECREF)> args(convertArgumentsToPyTuple(multi_inputs...), Py_DECREF);
+        std::unique_ptr<PyObject, decltype(&Py_DECREF)> myResult(PyObject_CallObject(func.get(), args.get()), Py_DECREF);
+        if (!myResult) {
+            std::cerr << "PythonHelper: bad result!"<< std::endl;
+            return 0;
+        }
+        R result;
+        if constexpr (std::is_same<R, unsigned long long>::value)
+            result = PyLong_AsUnsignedLongLong(myResult.get());
+        else if constexpr (std::is_same<R, long long>::value)
+            result = PyLong_AsLongLong(myResult.get());
+        else if constexpr (std::is_unsigned<R>::value)
+            result = PyLong_AsUnsignedLong(myResult.get());
+        else if constexpr (std::is_floating_point_v<R>)
+            result = PyFloat_AsDouble(myResult.get());
+        else if constexpr (std::is_same<R, const char*>::value || std::is_same<R, std::string>::value)
+            result = PyUnicode_AsUTF8(myResult.get());
+        else
+            result = PyLong_AsLong(myResult.get());
+
+        return result;
     }
 private:
     PyObject* pModule_ = nullptr;
