@@ -17,13 +17,13 @@ public:
         Py_Finalize();
     }
 
-    std::string runPythonFunction(const std::string& cmd) {
+    std::string runPythonFunction(const std::string_view& cmd) {
         PyObject* pName = PyUnicode_DecodeFSDefault("helperFunctionForPyCPP");
         PyObject* pFunc = PyObject_GetAttr(pModule_, pName);
         Py_DECREF(pName);
         
         if (pFunc && PyCallable_Check(pFunc)) {
-            PyObject* pArg = Py_BuildValue("(s)", cmd.c_str());
+            PyObject* pArg = Py_BuildValue("(s)", cmd.data());
             PyObject* pResult = PyObject_CallObject(pFunc, pArg);
             Py_DECREF(pArg);
             if (pResult) {
@@ -93,17 +93,11 @@ public:
     }
 
     template <typename... T>
-    PyObject *convertArgumentsToPyTuple(T &&... multi_inputs) //https://stackoverflow.com/questions/7230621/how-can-i-iterate-over-a-packed-variadic-template-argument-list
+    PyObject* convertArgumentsToPyTuple(const T&... multi_inputs)
     {
-        PyObject *pTupleWithArguments = PyTuple_New(sizeof...(T));
+        PyObject* pTupleWithArguments = PyTuple_New(sizeof...(T));
         int i = 0;
-        ([&](auto &input) {
-            PyObject *pArgument = convertVariableToPyObject(input);
-            PyTuple_SetItem(pTupleWithArguments, i, pArgument);
-            //Py_DECREF(pArgument);
-            ++i;
-        }(multi_inputs),
-         ...);
+        (PyTuple_SetItem(pTupleWithArguments, i++, convertVariableToPyObject(multi_inputs)), ...);
         return pTupleWithArguments;
     }
 
@@ -117,7 +111,7 @@ public:
         std::unique_ptr<PyObject, decltype(&Py_DECREF)> myResult(PyObject_CallObject(func.get(), args.get()), Py_DECREF);
         if (!myResult) {
             std::cerr << "PythonHelper: bad result!"<< std::endl;
-            return 0;
+            return R();
         }
         R result;
         if constexpr (std::is_same<R, unsigned long long>::value)
